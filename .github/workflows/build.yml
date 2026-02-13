@@ -51,10 +51,13 @@ jobs:
           docker run --rm --platform ${{ matrix.docker_arch }} \
             -v $PWD/artifacts:/output \
             alpine:latest sh -c '
-              apk add --no-cache git build-base linux-headers talloc-dev talloc-static python3 upx bsd-compat-headers
+              apk add --no-cache git build-base linux-headers talloc-dev talloc-static python3 upx bsd-compat-headers libarchive-dev
               cd /tmp
               git clone --depth 1 --branch v5.4.0 https://github.com/proot-me/proot.git
               cd proot/src
+              
+              sed -i "1i#include <libgen.h>" cli/cli.c
+              
               make proot
               strip proot
               upx --best --lzma proot || true
