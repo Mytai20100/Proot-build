@@ -30,11 +30,7 @@ jobs:
             docker_arch: linux/amd64
             base_image: alpine:latest
           
-          # ARM variants
-          - arch: armv5
-            docker_arch: linux/arm/v5
-            base_image: debian:stable-slim
-          
+          # ARM variants (bỏ armv5)
           - arch: armv6
             docker_arch: linux/arm/v6
             base_image: alpine:latest
@@ -66,33 +62,18 @@ jobs:
           docker run --rm --platform ${{ matrix.docker_arch }} \
             -v $PWD/artifacts:/output \
             ${{ matrix.base_image }} sh -c '
-              # Detect package manager and install dependencies
-              if command -v apk >/dev/null 2>&1; then
-                echo "Using Alpine Linux..."
-                apk add --no-cache git build-base linux-headers talloc-dev talloc-static python3 upx bsd-compat-headers libarchive-dev
-              elif command -v apt-get >/dev/null 2>&1; then
-                echo "Using Debian Linux..."
-                apt-get update
-                apt-get install -y git build-essential libtalloc-dev python3 upx-ucl libarchive-dev
-              else
-                echo "Unsupported distribution"
-                exit 1
-              fi
+              apk add --no-cache git build-base linux-headers talloc-dev talloc-static python3 upx bsd-compat-headers libarchive-dev
               
-              # Clone proot source
               cd /tmp
               git clone --depth 1 --branch v5.4.0 https://github.com/proot-me/proot.git
               cd proot/src
               
-              # Fix compilation issue
               sed -i "1i#include <libgen.h>" cli/cli.c
               
-              # Build
               make proot
               strip proot
               upx --best --lzma proot || true
               
-              # Copy to output
               cp proot /output/proot-${{ matrix.arch }}
               chmod +x /output/proot-${{ matrix.arch }}
             '
@@ -135,7 +116,7 @@ jobs:
           body: |
             Proot static binaries for multiple architectures
             
-            **Available:** i386, amd64, armv5, armv6, armv7, arm64
+            **Available:** i386, amd64, armv6, armv7, arm64
             
             Build: ${{ github.run_number }}
             Commit: ${{ github.sha }}
