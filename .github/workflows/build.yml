@@ -1,4 +1,4 @@
-name: Build Proot 
+name: Build Proot
 on:
   push:
     branches: [ main, master, develop ]
@@ -12,105 +12,60 @@ permissions:
 
 jobs:
   build:
-    name: Build Proot - ${{ matrix.arch }}
+    name: Build ${{ matrix.arch }}
     runs-on: ubuntu-latest
     
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: i686
-            target: i686-linux-musl
-            cc: i686-linux-musl-gcc
-          
-          - arch: x86_64
-            target: x86_64-linux-musl
-            cc: x86_64-linux-musl-gcc
-          
-          - arch: armv5tel
-            target: arm-linux-musleabi
-            cc: arm-linux-musleabi-gcc
-          
-          - arch: armv6l
-            target: arm-linux-musleabihf
-            cc: arm-linux-musleabihf-gcc
-          
-          - arch: armv7l
-            target: armv7l-linux-musleabihf
-            cc: armv7l-linux-musleabihf-gcc
-          
-          - arch: armhf
-            target: arm-linux-musleabihf
-            cc: arm-linux-musleabihf-gcc
-          
-          - arch: aarch64
-            target: aarch64-linux-musl
-            cc: aarch64-linux-musl-gcc
-          
-          - arch: mips
-            target: mips-linux-musl
-            cc: mips-linux-musl-gcc
-          
-          - arch: mipsel
-            target: mipsel-linux-musl
-            cc: mipsel-linux-musl-gcc
-          
-          - arch: mips64
-            target: mips64-linux-musl
-            cc: mips64-linux-musl-gcc
-          
-          - arch: mips64el
-            target: mips64el-linux-musl
-            cc: mips64el-linux-musl-gcc
+          - arch: i386
+            docker_arch: linux/386
+          - arch: amd64
+            docker_arch: linux/amd64
+          - arch: armv5
+            docker_arch: linux/arm/v5
+          - arch: armv6
+            docker_arch: linux/arm/v6
+          - arch: armv7
+            docker_arch: linux/arm/v7
+          - arch: arm64
+            docker_arch: linux/arm64/v8
     
     steps:
-      - name: Checkout proot source
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          repository: proot-me/proot
-          ref: v5.4.0
-          submodules: recursive
+          platforms: all
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential gcc-multilib g++-multilib wget curl git make autoconf automake libtool pkg-config python3 libarchive-dev libtalloc-dev uthash-dev upx-ucl
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Install musl cross-compiler
+      - name: Build proot
         run: |
-          cd /tmp
-          wget https://musl.cc/${{ matrix.target }}-cross.tgz
-          tar xzf ${{ matrix.target }}-cross.tgz
-          sudo mv ${{ matrix.target }}-cross /opt/
-          echo "/opt/${{ matrix.target }}-cross/bin" >> $GITHUB_PATH
+          mkdir -p artifacts
+          
+          docker run --rm --platform ${{ matrix.docker_arch }} \
+            -v $PWD/artifacts:/output \
+            alpine:latest sh -c '
+              apk add --no-cache git build-base linux-headers talloc-dev talloc-static python3 upx
+              cd /tmp
+              git clone --depth 1 --branch v5.4.0 https://github.com/proot-me/proot.git
+              cd proot/src
+              make proot
+              strip proot
+              upx --best --lzma proot || true
+              cp proot /output/proot-${{ matrix.arch }}
+              chmod +x /output/proot-${{ matrix.arch }}
+            '
 
-      - name: Build talloc static
+      - name: Test binary
         run: |
-          cd /tmp
-          wget https://download.samba.org/pub/talloc/talloc-2.4.2.tar.gz
-          tar xzf talloc-2.4.2.tar.gz
-          cd talloc-2.4.2
-          ./configure --prefix=/tmp/talloc-install --host=${{ matrix.target }} CC=${{ matrix.cc }} CFLAGS="-static -Os" --disable-python
-          make -j$(nproc)
-          make install
-
-      - name: Build proot static
-        run: |
-          cd src
-          export CC=${{ matrix.cc }}
-          export CFLAGS="-static -Os -ffunction-sections -fdata-sections"
-          export LDFLAGS="-static -s -Wl,--gc-sections"
-          export TALLOC_CFLAGS="-I/tmp/talloc-install/include"
-          export TALLOC_LDFLAGS="-L/tmp/talloc-install/lib -ltalloc"
-          make -j$(nproc) proot CC="$CC" CFLAGS="$CFLAGS $TALLOC_CFLAGS" LDFLAGS="$LDFLAGS $TALLOC_LDFLAGS"
-
-      - name: Strip and compress
-        run: |
-          cd src
-          ${{ matrix.target }}-strip proot
-          upx --best --lzma proot || true
-          mkdir -p ../artifacts
-          cp proot ../artifacts/proot-${{ matrix.arch }}
+          ls -lh artifacts/
+          file artifacts/proot-${{ matrix.arch }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -126,45 +81,36 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: all-artifacts
 
-      - name: Prepare release assets
+      - name: Prepare release
         run: |
-          mkdir -p release-assets
-          find all-artifacts -name "proot-*" -exec cp {} release-assets/ \;
-          ls -lh release-assets/
+          mkdir -p release
+          find all-artifacts -name "proot-*" -exec cp {} release/ \;
+          ls -lh release/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: proot-v5.4.0-${{ github.run_number }}
-          name: Proot Static v5.4.0 - Build ${{ github.run_number }}
+          tag_name: build-${{ github.run_number }}
+          name: Proot Build ${{ github.run_number }}
           body: |
-            Proot v5.4.0 static binaries
+            Proot static binaries
             
-            Architectures: i686, x86_64, armv5tel, armv6l, armv7l, armhf, aarch64, mips, mipsel, mips64, mips64el
+            Available: i386, amd64, armv5, armv6, armv7, arm64
             
             Usage:
             ```
-            wget URL/proot-armv7l
-            chmod +x proot-armv7l
-            proot-armv7l --version
+            chmod +x proot-armv7
+            ./proot-armv7 --version
             ```
             
-            Basic usage:
-            ```
-            proot -r /path/to/rootfs /bin/bash
-            proot -r /path/to/rootfs -b /sdcard -b /dev /bin/bash
-            proot -0 -r /path/to/rootfs /bin/bash
-            ```
-            
-            Build date: ${{ github.event.head_commit.timestamp }}
-            Static: Yes (musl libc)
-            Compressed: Yes (UPX LZMA)
-          files: release-assets/*
+            Build: ${{ github.run_number }}
+            Date: ${{ github.event.head_commit.timestamp }}
+          files: release/*
           draft: false
           prerelease: false
         env:
