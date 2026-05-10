@@ -65,7 +65,7 @@ jobs:
               # Strip binary
               strip proot
               
-              # KHÔNG dùng UPX - gây segfault trên nhiều thiết bị ARM
+        
               # upx --best --lzma proot || true
               
               # Copy output
